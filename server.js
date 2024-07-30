@@ -1,16 +1,17 @@
 require('dotenv').config();
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
 const mongoose = require('mongoose');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const passport = require('passport');
-const path = require('path');
 const flash = require('connect-flash');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 const Trip = require('./models/Trip'); // Ensure Trip model is imported
+const User = require('./models/User'); // Ensure User model is imported
 
 // Import routes
 const passwordResetRoutes = require('./routes/passwordReset');
@@ -30,6 +31,7 @@ const io = new Server(server);
 
 app.set('socketio', io);
 
+// Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -49,6 +51,7 @@ mongoose.connect(process.env.DB_URL, {
   console.error('MongoDB connection error:', err);
 });
 
+// Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -64,12 +67,46 @@ app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
 
-require('./config/passport')(passport);
+// Passport Local Strategy
+passport.use(new LocalStrategy(
+  async (username, password, done) => {
+    try {
+      const user = await User.findOne({ username });
+      if (!user) {
+        return done(null, false, { message: 'Incorrect username.' });
+      }
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return done(null, false, { message: 'Incorrect password.' });
+      }
+      return done(null, user);
+    } catch (error) {
+      return done(error);
+    }
+  }
+));
 
+// Serialize user into the session
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+// Deserialize user from the session
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await User.findById(id);
+    done(null, user);
+  } catch (error) {
+    done(error);
+  }
+});
+
+// View engine setup
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Routes
 app.get('/', (req, res) => {
   res.render('landing', { isLoggedIn: req.isAuthenticated(), user: req.user });
 });
@@ -106,6 +143,7 @@ app.post('/logout', (req, res) => {
   });
 });
 
+// Socket.io setup
 io.on('connection', (socket) => {
   console.log('a user connected');
 
@@ -144,3 +182,4 @@ app.post('/api/trip/book', async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
