@@ -1,39 +1,146 @@
 require('dotenv').config();
 const express = require('express');
-const mongoose = require('mongoose');
+const bodyParser = require('body-parser');
 const cors = require('cors');
-const questionsRouter = require('./routes/questions');
-const resultsRouter = require('./routes/results');
+const mongoose = require('mongoose');
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+const passport = require('passport');
+const path = require('path');
+const flash = require('connect-flash');
+const http = require('http');
+const { Server } = require('socket.io');
+const Trip = require('./models/Trip'); // Ensure Trip model is imported
+
+// Import routes
+const passwordResetRoutes = require('./routes/passwordReset');
+const adminRoutes = require('./routes/admin');
+const sellerRoutes = require('./routes/seller');
+const customerRoutes = require('./routes/customer');
+const authRoutes = require('./routes/auth');
+const foodFolderRoutes = require('./routes/foodFolder');
+const riderRoutes = require('./routes/rider');
+const tripRoutes = require('./routes/trip');
+const locationRoutes = require('./routes/location');
+const driverRoutes = require('./routes/driver');
 
 const app = express();
-const port = process.env.PORT || 5000;
+const server = http.createServer(app);
+const io = new Server(server);
 
-const dbUrl = process.env.DB_URL;
+app.set('socketio', io);
 
-// Define CORS options
-const corsOptions = {
-  origin: '*', // You can specify specific URLs for better security
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type'],
-};
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// Use CORS with the specified options
-app.use(cors(corsOptions));
-app.use(express.json());
+app.use(cors({
+  origin: 'http://192.168.43.59:5000', // Your frontend URL
+  credentials: true
+}));
 
-mongoose.connect(dbUrl, {
+mongoose.connect(process.env.DB_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 5000
-}).then(() => {
+})
+.then(() => {
   console.log('Connected to MongoDB');
-}).catch((err) => {
+})
+.catch(err => {
   console.error('MongoDB connection error:', err);
 });
 
-app.use('/api', questionsRouter);
-app.use('/api', resultsRouter);
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.DB_URL,
+    collectionName: 'sessions'
+  }),
+  cookie: { secure: false } // Set to true if using HTTPS
+}));
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+app.use(flash());
+app.use(passport.initialize());
+app.use(passport.session());
+
+require('./config/passport')(passport);
+
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/', (req, res) => {
+  res.render('landing', { isLoggedIn: req.isAuthenticated(), user: req.user });
 });
+
+app.use('/api/auth', authRoutes);
+app.use('/admin', adminRoutes);
+app.use('/seller', sellerRoutes);
+app.use('/customer', customerRoutes);
+app.use('/api/password-reset', passwordResetRoutes);
+app.use('/foodFolder', foodFolderRoutes);
+app.use('/api/rider', riderRoutes);
+app.use('/api/trip', tripRoutes);
+app.use('/socket', locationRoutes);
+app.use('/api/driver', driverRoutes);
+
+app.get('/register', (req, res) => {
+  res.render('register');
+});
+
+app.get('/request-reset', (req, res) => {
+  res.render('request-reset');
+});
+
+app.get('/reset/:token', (req, res) => {
+  res.render('reset-password', { token: req.params.token });
+});
+
+app.post('/logout', (req, res) => {
+  req.logout(err => {
+    if (err) {
+      return next(err);
+    }
+    res.redirect('/');
+  });
+});
+
+io.on('connection', (socket) => {
+  console.log('a user connected');
+
+  socket.on('join', (userId) => {
+    socket.join(userId);
+  });
+
+  socket.on('driverLocationUpdate', (data) => {
+    io.emit('driverLocationUpdate', data);
+  });
+
+  socket.on('riderLocationUpdate', (data) => {
+    io.emit('riderLocationUpdate', data);
+  });
+
+  socket.on('driverStatusUpdate', (data) => {
+    io.emit('driverStatusUpdate', data);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('user disconnected');
+  });
+});
+
+// Emit new trip request to connected clients
+app.post('/api/trip/book', async (req, res) => {
+  try {
+    const newTrip = new Trip(req.body);
+    await newTrip.save();
+    io.emit('newTrip', newTrip);
+    res.status(201).send(newTrip);
+  } catch (error) {
+    res.status(500).send({ error: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

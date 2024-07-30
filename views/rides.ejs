@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rides</title>
+    <link rel="stylesheet" href="/css/rides.css">
+</head>
+<body>
+    <h1>Rides Booked by Customers</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Rider</th>
+                <th>Driver</th>
+                <th>Origin</th>
+                <th>Destination</th>
+                <th>Status</th>
+                <th>Fare</th>
+                <th>Distance</th>
+                <th>Duration</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% trips.forEach(trip => { %>
+                <tr>
+                    <td><%= trip.rider.username %> (<%= trip.rider.email %>)</td>
+                    <td><%= trip.driver.username %> (<%= trip.driver.email %>)</td>
+                    <td><%= trip.origin %></td>
+                    <td><%= trip.destination %></td>
+                    <td><%= trip.status %></td>
+                    <td><%= trip.fare %></td>
+                    <td><%= trip.distance %> meters</td>
+                    <td><%= trip.duration %> seconds</td>
+                    <td>
+                        <% if (!trip.approved) { %>
+                            <form action="/api/trip/approve/<%= trip._id %>" method="POST" style="display:inline;">
+                                <button type="submit" class="approve-btn">Approve</button>
+                            </form>
+                            <form action="/api/trip/reject/<%= trip._id %>" method="POST" style="display:inline;">
+                                <button type="submit" class="reject-btn">Reject</button>
+                            </form>
+                        <% } %>
+                    </td>
+                </tr>
+            <% }) %>
+        </tbody>
+    </table>
+</body>
+</html>

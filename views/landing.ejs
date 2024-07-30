@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Merliz</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+    body {
+      font-family: 'Poppins', sans-serif;
+      background-color: #f4f4f4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      animation: fadeIn 2s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .container {
+      background: #fff;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+      padding-top: 3.5rem;
+      animation: slideIn 1s ease-in-out;
+    }
+    @keyframes slideIn {
+      from { transform: translateY(-50px); }
+      to { transform: translateY(0); }
+    }
+    .logo {
+      width: 120px;
+      margin-bottom: 20px;
+      border-radius: 50%;
+      animation: logoSpin 6s linear;
+    }
+    @keyframes logoSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    h1 {
+      color: #333;
+      margin: 0;
+      font-weight: 600;
+    }
+    .slogan {
+      color: #666;
+      font-size: 1.2rem;
+      margin: 10px 0 20px 0;
+    }
+    .btn {
+      display: inline-block;
+      margin: 10px;
+      padding: 12px 25px;
+      background-color: #000;
+      color: #FFD700;
+      text-decoration: none;
+      border-radius: 5px;
+      font-weight: 600;
+      transition: background 0.3s ease, transform 0.2s;
+      width: 150px; /* Ensure all buttons have the same width */
+      text-align: center; /* Center the content */
+    }
+    .btn i {
+      margin-right: 8px;
+    }
+    .btn:hover {
+      background-color: #333;
+      transform: scale(1.05);
+    }
+    .btn-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .btn-container a, .btn-container button {
+      margin: 10px;
+      flex: 0 0 45%; /* Ensure two buttons in a row */
+      max-width: 45%; /* Ensure two buttons in a row */
+      box-sizing: border-box;
+    }
+    .welcome-message {
+      color: #FFD700;
+      font-size: 1.2rem;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="/images/logo.png" alt="Merliz Logo" class="logo">
+    <h1>Welcome to Merliz</h1>
+    <p class="slogan">SIMPLICITY AT YOUR CONVENIENCE</p>
+    <% if (!isLoggedIn) { %>
+      <p>Please login or register to continue.</p>
+      <div class="btn-container">
+        <a href="/admin/admin-login" class="btn"><i class="fas fa-user-shield"></i>Admin Login</a>
+        <a href="/seller/seller-login" class="btn"><i class="fas fa-store"></i>Seller Login</a>
+        <!-- <a href="/customer/customer-login" class="btn"><i class="fas fa-users"></i>Customer Login</a> -->
+        <!-- <a href="/register" class="btn"><i class="fas fa-user-plus"></i>Register</a> -->
+      </div>
+    <% } else { %>
+      <p class="welcome-message">Welcome, <%= user.username %>!</p>
+      <p>You are already logged in.</p>
+      <form action="/logout" method="post">
+        <button type="submit" class="btn"><i class="fas fa-sign-out-alt"></i>Logout</button>
+      </form>
+    <% } %>
+  </div>
+</body>
+</html>

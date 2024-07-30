@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rider Dashboard</title>
+    <link rel="stylesheet" href="/css/rider-dashboard.css">
+</head>
+<body>
+    <h1>Your Booked Rides</h1>
+    <div id="notifications"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Driver</th>
+                <th>Origin</th>
+                <th>Destination</th>
+                <th>Status</th>
+                <th>Fare</th>
+                <th>Distance</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% trips.forEach(trip => { %>
+                <tr id="trip-<%= trip._id %>">
+                    <td><%= trip.driver.username %> (<%= trip.driver.email %>)</td>
+                    <td><%= trip.origin %></td>
+                    <td><%= trip.destination %></td>
+                    <td class="status"><%= trip.status %></td>
+                    <td><%= trip.fare %></td>
+                    <td><%= trip.distance %> meters</td>
+                    <td><%= trip.duration %> seconds</td>
+                </tr>
+            <% }) %>
+        </tbody>
+    </table>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const userId = "<%= user._id %>";
+
+        socket.emit('join', userId);
+
+        socket.on('tripApproved', (trip) => {
+            const notification = document.createElement('div');
+            notification.textContent = `Your trip from ${trip.origin} to ${trip.destination} has been approved!`;
+            notification.className = 'notification';
+            document.getElementById('notifications').appendChild(notification);
+
+            const tripRow = document.getElementById(`trip-${trip._id}`);
+            if (tripRow) {
+                tripRow.querySelector('.status').textContent = 'accepted';
+            }
+        });
+
+        socket.on('tripRejected', (trip) => {
+            const notification = document.createElement('div');
+            notification.textContent = `Your trip from ${trip.origin} to ${trip.destination} has been rejected.`;
+            notification.className = 'notification';
+            document.getElementById('notifications').appendChild(notification);
+
+            const tripRow = document.getElementById(`trip-${trip._id}`);
+            if (tripRow) {
+                tripRow.querySelector('.status').textContent = 'cancelled';
+            }
+        });
+    </script>
+</body>
+</html>
