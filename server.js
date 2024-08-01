@@ -10,7 +10,7 @@ const path = require('path');
 const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
-const Trip = require('./models/Trip'); // Ensure Trip model is imported
+const Trip = require('./models/Trip');
 
 // Import routes
 const passwordResetRoutes = require('./routes/passwordReset');
@@ -34,7 +34,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use(cors({
-  origin: 'http://192.168.43.59:5000', // Your frontend URL
+  origin: 'http://localhost:5000',
   credentials: true
 }));
 
@@ -57,7 +57,7 @@ app.use(session({
     mongoUrl: process.env.DB_URL,
     collectionName: 'sessions'
   }),
-  cookie: { secure: false } // Set to true if using HTTPS
+  cookie: { secure: false }
 }));
 
 app.use(flash());
@@ -113,33 +113,9 @@ io.on('connection', (socket) => {
     socket.join(userId);
   });
 
-  socket.on('driverLocationUpdate', (data) => {
-    io.emit('driverLocationUpdate', data);
-  });
-
-  socket.on('riderLocationUpdate', (data) => {
-    io.emit('riderLocationUpdate', data);
-  });
-
-  socket.on('driverStatusUpdate', (data) => {
-    io.emit('driverStatusUpdate', data);
-  });
-
   socket.on('disconnect', () => {
     console.log('user disconnected');
   });
-});
-
-// Emit new trip request to connected clients
-app.post('/api/trip/book', async (req, res) => {
-  try {
-    const newTrip = new Trip(req.body);
-    await newTrip.save();
-    io.emit('newTrip', newTrip);
-    res.status(201).send(newTrip);
-  } catch (error) {
-    res.status(500).send({ error: error.message });
-  }
 });
 
 const PORT = process.env.PORT || 5000;

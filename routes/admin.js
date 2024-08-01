@@ -43,24 +43,31 @@ router.get('/rides', ensureAuthenticated, ensureRole('admin'), async (req, res) 
 });
 
 // Approve a Trip
-// Approve a Trip
 router.post('/approve/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
+      console.log('Trip not found');
       return res.status(404).json({ message: 'Trip not found' });
     }
+
+    console.log('Trip found:', trip);
 
     trip.status = 'accepted';
     trip.approved = true;
     await trip.save();
 
+    console.log('Trip approved:', trip);
+
     // Notify the rider about the approval
     const io = req.app.get('socketio');
     io.to(trip.rider._id.toString()).emit('tripApproved', trip);
 
+    console.log('Event emitted to rider:', trip.rider._id.toString());
+
     res.status(200).json({ message: 'Trip approved', trip });
   } catch (error) {
+    console.error('Error approving trip:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -70,24 +77,30 @@ router.post('/reject/:tripId', ensureAuthenticated, ensureRole('admin'), async (
   try {
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
+      console.log('Trip not found');
       return res.status(404).json({ message: 'Trip not found' });
     }
+
+    console.log('Trip found:', trip);
 
     trip.status = 'cancelled';
     trip.approved = false;
     await trip.save();
 
+    console.log('Trip rejected:', trip);
+
     // Notify the rider about the rejection
     const io = req.app.get('socketio');
     io.to(trip.rider._id.toString()).emit('tripRejected', trip);
 
+    console.log('Event emitted to rider:', trip.rider._id.toString());
+
     res.status(200).json({ message: 'Trip rejected', trip });
   } catch (error) {
+    console.error('Error rejecting trip:', error);
     res.status(500).json({ error: error.message });
   }
 });
-
-
 
 // Delete User Route
 router.delete('/delete/:id', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
