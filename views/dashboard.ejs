@@ -7,7 +7,8 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      background-color: #f4f4f4;
+      background-color: #000000;
+      color: #ffffff;
       margin: 0;
       padding: 0;
       display: flex;
@@ -15,14 +16,17 @@
       align-items: center;
       justify-content: center;
       height: 100vh;
+      overflow-x: hidden;
+      position: relative;
     }
     h1 {
-      background-color: #007bff;
-      color: white;
+      background-color: #000000;
+      color: #ffd700;
       padding: 1rem;
       width: 100%;
       text-align: center;
       margin: 0;
+      border-bottom: 1px solid #ffd700;
     }
     .card-container {
       display: flex;
@@ -32,7 +36,6 @@
       flex-wrap: wrap;
     }
     .card {
-      background: white;
       border-radius: 8px;
       box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
       padding: 2rem;
@@ -40,6 +43,13 @@
       cursor: pointer;
       width: 150px;
       transition: transform 0.3s ease;
+      color: #000000;
+    }
+    .card.gold {
+      background-color: #ffd700;
+    }
+    .card.white {
+      background-color: #ffffff;
     }
     .card:hover {
       transform: scale(1.05);
@@ -55,7 +65,9 @@
       padding: 0.5rem 1rem;
       cursor: pointer;
       border-radius: 5px;
-      margin-top: 2rem;
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
     }
     .logout-btn:hover {
       background-color: #c0392b;
@@ -63,22 +75,22 @@
   </style>
 </head>
 <body>
+  <button class="logout-btn" onclick="logout()">Logout</button>
   <h1>Admin Dashboard</h1>
   <div class="card-container">
-    <div class="card" onclick="window.location.href='/admin/sellers'">
+    <div class="card gold" onclick="window.location.href='/admin/sellers'">
       <h2>Sellers</h2>
     </div>
-    <div class="card" onclick="window.location.href='/foodFolder/home'">
+    <div class="card white" onclick="window.location.href='/foodFolder/home'">
       <h2>Food</h2>
     </div>
-    <div class="card" onclick="window.location.href='/admin/rides'">
+    <div class="card gold" onclick="window.location.href='/admin/rides'">
       <h2>Rides</h2>
     </div>
-    <div class="card" onclick="window.location.href='/rider/dashboard'">
+    <div class="card white" onclick="window.location.href='/rider/dashboard'">
       <h2>Rider Dashboard</h2>
     </div>
   </div>
-  <button class="logout-btn" onclick="logout()">Logout</button>
 
   <script>
     async function logout() {
