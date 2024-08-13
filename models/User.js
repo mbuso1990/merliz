@@ -16,7 +16,8 @@ const UserSchema = new mongoose.Schema({
   },
   email: { type: String, required: true, unique: true },
   role: { type: String, enum: ['admin', 'seller', 'customer', 'driver', 'rider'], default: 'customer' },
-  phone: { type: String },
+  phone: { type: String },  // Phone number field
+  profilePicture: { type: String },  // Profile picture URL field
   vehicle: {
     make: { type: String },
     model: { type: String },

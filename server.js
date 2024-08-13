@@ -10,7 +10,6 @@ const path = require('path');
 const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
-const Trip = require('./models/Trip');
 
 // Import routes
 const passwordResetRoutes = require('./routes/passwordReset');
@@ -23,6 +22,20 @@ const riderRoutes = require('./routes/rider');
 const tripRoutes = require('./routes/trip');
 const locationRoutes = require('./routes/location');
 const driverRoutes = require('./routes/driver');
+const chatRoutes = require('./routes/chat');
+
+const Pusher = require('pusher');
+
+const pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER,
+  useTLS: true
+});
+
+
+
 
 const app = express();
 const server = http.createServer(app);
@@ -82,7 +95,10 @@ app.use('/api/password-reset', passwordResetRoutes);
 app.use('/foodFolder', foodFolderRoutes);
 app.use('/api/rider', riderRoutes);
 app.use('/api/trip', tripRoutes);
+
 app.use('/socket', locationRoutes);
+app.use('/driver', driverRoutes);
+app.use('/api/chat', chatRoutes);
 app.use('/api/driver', driverRoutes);
 
 app.get('/register', (req, res) => {
@@ -97,7 +113,8 @@ app.get('/reset/:token', (req, res) => {
   res.render('reset-password', { token: req.params.token });
 });
 
-app.post('/logout', (req, res) => {
+
+app.post('/logout', (req, res, next) => {
   req.logout(err => {
     if (err) {
       return next(err);
@@ -109,14 +126,35 @@ app.post('/logout', (req, res) => {
 io.on('connection', (socket) => {
   console.log('a user connected');
 
-  socket.on('join', (userId) => {
-    socket.join(userId);
+  socket.on('joinRoom', ({ userId, tripId }) => {
+    socket.join(tripId);
+    console.log(`User ${userId} joined room ${tripId}`);
+  });
+
+  socket.on('chatMessage', (message) => {
+    console.log(`Message to ${message.tripId}: ${message.message}`);
+    
+    // Emit the message using Socket.IO
+    io.to(message.tripId).emit('chatMessage', message);
+
+    // Also trigger a Pusher event to broadcast the message
+    pusher.trigger('my-channel', 'my-event', {
+      message: message.message,
+      tripId: message.tripId,
+      userId: message.userId,
+    });
+  });
+
+  socket.on('driverLocationUpdate', ({ tripId, location }) => {
+    console.log(`Driver for trip ${tripId} is at location:`, location);
+    io.to(tripId).emit('driverLocationUpdate', { tripId, location });
   });
 
   socket.on('disconnect', () => {
     console.log('user disconnected');
   });
 });
+
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

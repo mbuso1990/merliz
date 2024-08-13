@@ -35,72 +35,99 @@ router.get('/sellers', ensureAuthenticated, ensureRole('admin'), async (req, res
 // Rides section route
 router.get('/rides', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
-    const trips = await Trip.find().populate('rider driver');
-    res.render('rides', { trips });
+    const drivers = await User.find({ role: 'driver' }).select('username email status');
+    res.render('rides', { drivers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Driver Details route
+router.get('/rides/:driverId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+  try {
+    const driver = await User.findById(req.params.driverId).populate('rideHistory');
+    const trips = await Trip.find({ driver: driver._id }).populate('rider');
+    res.render('driverDetails', { driver, trips });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+// Freeze a Trip
+router.post('/freeze/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.tripId);
+    if (!trip) {
+      return res.status(404).json({ message: 'Trip not found' });
+    }
+    trip.status = 'frozen';
+    await trip.save();
+    res.redirect(`/admin/rides/${trip.driver}`);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Unfreeze a Trip
+router.post('/unfreeze/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.tripId);
+    if (!trip) {
+      return res.status(404).json({ message: 'Trip not found' });
+    }
+    trip.status = 'requested';
+    await trip.save();
+    res.redirect(`/admin/rides/${trip.driver}`);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // Approve a Trip
-router.post('/approve/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+router.post('/approve/:tripId', ensureAuthenticated, ensureRole(['admin', 'driver']), async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
-      console.log('Trip not found');
       return res.status(404).json({ message: 'Trip not found' });
     }
-
-    console.log('Trip found:', trip);
 
     trip.status = 'accepted';
     trip.approved = true;
     await trip.save();
 
-    console.log('Trip approved:', trip);
-
-    // Notify the rider about the approval
     const io = req.app.get('socketio');
     io.to(trip.rider._id.toString()).emit('tripApproved', trip);
 
-    console.log('Event emitted to rider:', trip.rider._id.toString());
-
     res.status(200).json({ message: 'Trip approved', trip });
   } catch (error) {
-    console.error('Error approving trip:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // Reject a Trip
-router.post('/reject/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['admin', 'driver']), async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
-      console.log('Trip not found');
       return res.status(404).json({ message: 'Trip not found' });
     }
-
-    console.log('Trip found:', trip);
 
     trip.status = 'cancelled';
     trip.approved = false;
     await trip.save();
 
-    console.log('Trip rejected:', trip);
-
-    // Notify the rider about the rejection
     const io = req.app.get('socketio');
     io.to(trip.rider._id.toString()).emit('tripRejected', trip);
 
-    console.log('Event emitted to rider:', trip.rider._id.toString());
-
     res.status(200).json({ message: 'Trip rejected', trip });
   } catch (error) {
-    console.error('Error rejecting trip:', error);
     res.status(500).json({ error: error.message });
   }
 });
+
+
 
 // Delete User Route
 router.delete('/delete/:id', ensureAuthenticated, ensureRole('admin'), async (req, res) => {

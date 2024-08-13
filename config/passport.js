@@ -8,22 +8,32 @@ module.exports = function(passport) {
   passport.use(
     new LocalStrategy(async (username, password, done) => {
       try {
+        console.log(`Attempting login for username: ${username}`);
+  
         const user = await User.findOne({ username });
+        console.log('User found:', user);
+  
         if (!user) {
+          console.log('User not found');
           return done(null, false, { message: 'User not found' });
         }
-
+  
         const isMatch = await bcrypt.compare(password, user.password);
+        console.log('Password match:', isMatch);
+  
         if (!isMatch) {
+          console.log('Incorrect password');
           return done(null, false, { message: 'Incorrect password' });
         }
-
+  
         return done(null, user);
       } catch (err) {
+        console.error('Error during login:', err);
         return done(err);
       }
     })
   );
+  
 
   // Google Strategy
   passport.use(

@@ -1,16 +1,35 @@
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
+
 const ensureAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
-    return next();
+  const authHeader = req.header('Authorization');
+  
+  if (!authHeader) {
+    return res.status(401).json({ message: 'Authorization header missing' });
   }
-  res.status(401).json({ message: 'Unauthorized' });
+
+  const token = authHeader.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    req.isAuthenticated = true; // Set isAuthenticated to true
+    next();
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
 };
 
-const ensureRole = (role) => {
+const ensureRole = (roles) => {
   return (req, res, next) => {
-    if (req.isAuthenticated() && (req.user.role === role || req.user.role === 'admin')) {
+    if (req.isAuthenticated && roles.includes(req.user.role)) {
       return next();
     }
-    res.status(403).json({ message: `Access denied. ${role.charAt(0).toUpperCase() + role.slice(1)}s only.` });
+    res.status(403).json({ message: `Access denied. ${roles.join(', ')} only.` });
   };
 };
 

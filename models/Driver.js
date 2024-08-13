@@ -17,7 +17,8 @@ const DriverSchema = new Schema({
     coordinates: { type: [Number], required: true }
   },
   status: { type: String, enum: ['online', 'offline'], default: 'offline' },
-  rideHistory: [{ type: Schema.Types.ObjectId, ref: 'Trip' }]
+  rideHistory: [{ type: Schema.Types.ObjectId, ref: 'Trip' }],
+  profilePicture: { type: String, default: '' } // Add this line for profile picture
 }, { timestamps: true });
 
 DriverSchema.index({ currentLocation: '2dsphere' });
