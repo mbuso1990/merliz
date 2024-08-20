@@ -10,22 +10,15 @@ const path = require('path');
 const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
-
-// Import routes
-const passwordResetRoutes = require('./routes/passwordReset');
-const adminRoutes = require('./routes/admin');
-const sellerRoutes = require('./routes/seller');
-const customerRoutes = require('./routes/customer');
-const authRoutes = require('./routes/auth');
-const foodFolderRoutes = require('./routes/foodFolder');
-const riderRoutes = require('./routes/rider');
-const tripRoutes = require('./routes/trip');
-const locationRoutes = require('./routes/location');
-const driverRoutes = require('./routes/driver');
-const chatRoutes = require('./routes/chat');
-
 const Pusher = require('pusher');
+const methodOverride = require('method-override'); // Add method-override
 
+// Initialize Express app and HTTP server
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// Configure Pusher
 const pusher = new Pusher({
   appId: process.env.PUSHER_APP_ID,
   key: process.env.PUSHER_KEY,
@@ -34,95 +27,80 @@ const pusher = new Pusher({
   useTLS: true
 });
 
-
-
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
+// Set Socket.IO instance to be accessible throughout the app
 app.set('socketio', io);
+
+// Middleware setup
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(methodOverride('_method'));
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-
 app.use(cors({
   origin: 'http://localhost:5000',
   credentials: true
 }));
 
+// MongoDB connection
 mongoose.connect(process.env.DB_URL, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => {
-  console.log('Connected to MongoDB');
-})
-.catch(err => {
-  console.error('MongoDB connection error:', err);
-});
+.then(() => console.log('Connected to MongoDB'))
+.catch(err => console.error('MongoDB connection error:', err));
 
+// Session management
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.DB_URL,
-    collectionName: 'sessions'
-  }),
+  store: MongoStore.create({ mongoUrl: process.env.DB_URL, collectionName: 'sessions' }),
   cookie: { secure: false }
 }));
 
+// Passport.js setup
 app.use(flash());
 app.use(passport.initialize());
 app.use(passport.session());
-
 require('./config/passport')(passport);
 
+// EJS setup
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/', (req, res) => {
-  res.render('landing', { isLoggedIn: req.isAuthenticated(), user: req.user });
-});
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/admin', require('./routes/admin'));
+app.use('/seller', require('./routes/seller'));
+app.use('/customer', require('./routes/customer'));
+app.use('/api/password-reset', require('./routes/passwordReset'));
+app.use('/foodFolder', require('./routes/foodFolder'));
+app.use('/api/rider', require('./routes/rider'));
+app.use('/api/trip', require('./routes/trip'));
+app.use('/socket', require('./routes/location'));
+app.use('/driver', require('./routes/driver'));
+app.use('/api/chat', require('./routes/chat'));
+app.use('/products', require('./routes/productRoutes')); // Existing routes for product management
+app.use('/api/products', require('./routes/apiProductRoutes')); // API routes for products
+app.use('/api/orders', require('./routes/orderRoutes')); // Adding the order routes
 
-app.use('/api/auth', authRoutes);
-app.use('/admin', adminRoutes);
-app.use('/seller', sellerRoutes);
-app.use('/customer', customerRoutes);
-app.use('/api/password-reset', passwordResetRoutes);
-app.use('/foodFolder', foodFolderRoutes);
-app.use('/api/rider', riderRoutes);
-app.use('/api/trip', tripRoutes);
+// Static Pages
+app.get('/', (req, res) => res.render('landing', { isLoggedIn: req.isAuthenticated(), user: req.user }));
+app.get('/register', (req, res) => res.render('register'));
+app.get('/request-reset', (req, res) => res.render('request-reset'));
+app.get('/reset/:token', (req, res) => res.render('reset-password', { token: req.params.token }));
 
-app.use('/socket', locationRoutes);
-app.use('/driver', driverRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/driver', driverRoutes);
-
-app.get('/register', (req, res) => {
-  res.render('register');
-});
-
-app.get('/request-reset', (req, res) => {
-  res.render('request-reset');
-});
-
-app.get('/reset/:token', (req, res) => {
-  res.render('reset-password', { token: req.params.token });
-});
-
-
+// Logout
 app.post('/logout', (req, res, next) => {
   req.logout(err => {
-    if (err) {
-      return next(err);
-    }
+    if (err) return next(err);
     res.redirect('/');
   });
 });
 
+// Socket.IO connections
 io.on('connection', (socket) => {
   console.log('a user connected');
 
@@ -133,11 +111,9 @@ io.on('connection', (socket) => {
 
   socket.on('chatMessage', (message) => {
     console.log(`Message to ${message.tripId}: ${message.message}`);
-    
-    // Emit the message using Socket.IO
+
     io.to(message.tripId).emit('chatMessage', message);
 
-    // Also trigger a Pusher event to broadcast the message
     pusher.trigger('my-channel', 'my-event', {
       message: message.message,
       tripId: message.tripId,
@@ -150,11 +126,10 @@ io.on('connection', (socket) => {
     io.to(tripId).emit('driverLocationUpdate', { tripId, location });
   });
 
-  socket.on('disconnect', () => {
-    console.log('user disconnected');
-  });
+  socket.on('disconnect', () => console.log('user disconnected'));
 });
 
 
+// Start server
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

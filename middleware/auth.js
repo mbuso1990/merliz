@@ -26,6 +26,11 @@ const ensureAuthenticated = (req, res, next) => {
 
 const ensureRole = (roles) => {
   return (req, res, next) => {
+    // Ensure roles is always an array
+    if (!Array.isArray(roles)) {
+      roles = [roles];
+    }
+    
     if (req.isAuthenticated && roles.includes(req.user.role)) {
       return next();
     }

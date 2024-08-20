@@ -299,6 +299,7 @@ router.put('/status/:driverId', async (req, res) => {
   }
 });
 
+
 // Delete All Drivers (Admin only)
 router.delete('/drivers', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
