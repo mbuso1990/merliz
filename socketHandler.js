@@ -1,5 +1,4 @@
-// socketHandler.js
-const pusher = require('pusher');
+const Pusher = require('pusher');  // Correct import statement
 
 const pusherInstance = new Pusher({
   appId: process.env.PUSHER_APP_ID,
