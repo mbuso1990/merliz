@@ -116,8 +116,6 @@ router.post('/approve/:tripId', ensureAuthenticated, ensureRole(['driver', 'admi
 });
 
 
-// Reject a Trip
-// Reject a Trip
 router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['driver', 'admin']), async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.tripId).populate('rider');
@@ -140,6 +138,7 @@ router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['driver', 'admin
     res.status(500).json({ error: error.message });
   }
 });
+
 
 
 // Get Trip Status by ID
