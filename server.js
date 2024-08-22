@@ -11,24 +11,15 @@ const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
 const Pusher = require('pusher');
-const methodOverride = require('method-override'); // Add method-override
+const methodOverride = require('method-override');
+const socketHandler = require('./socketHandler');
 
 // Initialize Express app and HTTP server
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server);  // Initialize the Socket.IO server
 
-// Configure Pusher
-const pusher = new Pusher({
-  appId: process.env.PUSHER_APP_ID,
-  key: process.env.PUSHER_KEY,
-  secret: process.env.PUSHER_SECRET,
-  cluster: process.env.PUSHER_CLUSTER,
-  useTLS: true
-});
-
-// Set Socket.IO instance to be accessible throughout the app
-app.set('socketio', io);
+socketHandler(io);  // Call the socketHandler with the io instance
 
 // Middleware setup
 app.use(express.urlencoded({ extended: true }));
@@ -98,35 +89,6 @@ app.post('/logout', (req, res, next) => {
     if (err) return next(err);
     res.redirect('/');
   });
-});
-
-// Socket.IO connections
-io.on('connection', (socket) => {
-  console.log('a user connected');
-
-  socket.on('joinRoom', ({ userId, tripId }) => {
-    socket.join(tripId);
-    console.log(`User ${userId} joined room ${tripId}`);
-  });
-
-  socket.on('chatMessage', (message) => {
-    console.log(`Message to ${message.tripId}: ${message.message}`);
-
-    io.to(message.tripId).emit('chatMessage', message);
-
-    pusher.trigger('my-channel', 'my-event', {
-      message: message.message,
-      tripId: message.tripId,
-      userId: message.userId,
-    });
-  });
-
-  socket.on('driverLocationUpdate', ({ tripId, location }) => {
-    console.log(`Driver for trip ${tripId} is at location:`, location);
-    io.to(tripId).emit('driverLocationUpdate', { tripId, location });
-  });
-
-  socket.on('disconnect', () => console.log('user disconnected'));
 });
 
 // Start server
