@@ -16,10 +16,18 @@ const ensureAuthenticated = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Log the decoded user for debugging
+    console.log('Decoded User:', decoded);
+    
+    // Ensure req.user._id is available
     req.user = decoded;
+    req.user._id = decoded._id || decoded.id; // Use _id or id depending on what's available
+    
     req.isAuthenticated = true; // Set isAuthenticated to true
     next();
   } catch (err) {
+    console.error('Token verification failed:', err.message);
     return res.status(401).json({ message: 'Invalid token' });
   }
 };

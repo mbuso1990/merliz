@@ -1,32 +1,46 @@
 const express = require('express');
 const router = express.Router();
 const passport = require('passport');
+const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Trip = require('../models/Trip');
 const { ensureAuthenticated, ensureRole } = require('../middleware/auth');
 
-// Admin Login (public route)
-router.get('/admin-login', (req, res) => {
-  res.render('admin-login', { message: req.flash('error') });
-});
+const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
 
-// Admin Login POST handler
-router.post('/admin-login', passport.authenticate('local', {
-  successRedirect: '/admin/dashboard',
-  failureRedirect: '/admin/admin-login',
-  failureFlash: true
-}));
+// Admin Login POST handler with JWT token
+router.post('/admin-login', (req, res, next) => {
+  passport.authenticate('local', (err, user, info) => {
+    if (err) return next(err);
+    if (!user) return res.status(400).json({ message: info.message });
+
+    // Ensure the user has the 'admin' role
+    if (user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admins only.' });
+    }
+
+    // Generate a JWT token
+    const token = jwt.sign(
+      { id: user._id, username: user.username, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    // Respond with the token and user information
+    return res.json({ token, user: { id: user._id, username: user.username, role: user.role } });
+  })(req, res, next);
+});
 
 // Admin Dashboard (protected route)
 router.get('/dashboard', ensureAuthenticated, ensureRole('admin'), (req, res) => {
-  res.render('dashboard', { isLoggedIn: req.isAuthenticated(), user: req.user });
+  res.json({ message: 'Welcome to the admin dashboard', user: req.user });
 });
 
 // Sellers section route
 router.get('/sellers', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
     const sellers = await User.find({ role: 'seller' }).select('username email createdAt');
-    res.render('sellers', { sellers });
+    res.json({ sellers });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -36,7 +50,21 @@ router.get('/sellers', ensureAuthenticated, ensureRole('admin'), async (req, res
 router.get('/rides', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
     const drivers = await User.find({ role: 'driver' }).select('username email status');
-    res.render('rides', { drivers });
+    res.json({ drivers });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get All Requested Trips
+router.get('/trips', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+  try {
+    const trips = await Trip.find({ status: 'requested' })
+      .populate('rider', 'username email')
+      .populate('driver', 'username email')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({ trips });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -47,13 +75,11 @@ router.get('/rides/:driverId', ensureAuthenticated, ensureRole('admin'), async (
   try {
     const driver = await User.findById(req.params.driverId).populate('rideHistory');
     const trips = await Trip.find({ driver: driver._id }).populate('rider');
-    res.render('driverDetails', { driver, trips });
+    res.json({ driver, trips });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 // Freeze a Trip
 router.post('/freeze/:tripId', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
@@ -64,7 +90,7 @@ router.post('/freeze/:tripId', ensureAuthenticated, ensureRole('admin'), async (
     }
     trip.status = 'frozen';
     await trip.save();
-    res.redirect(`/admin/rides/${trip.driver}`);
+    res.json({ message: 'Trip frozen', trip });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -79,7 +105,7 @@ router.post('/unfreeze/:tripId', ensureAuthenticated, ensureRole('admin'), async
     }
     trip.status = 'requested';
     await trip.save();
-    res.redirect(`/admin/rides/${trip.driver}`);
+    res.json({ message: 'Trip unfrozen', trip });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -127,8 +153,6 @@ router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['admin', 'driver
   }
 });
 
-
-
 // Delete User Route
 router.delete('/delete/:id', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
   try {
@@ -146,7 +170,7 @@ router.post('/logout', (req, res) => {
       if (err) {
         return res.status(500).json({ message: 'Error logging out' });
       }
-      res.redirect('/admin/admin-login');
+      res.json({ message: 'Logged out successfully' });
     });
   } else {
     res.status(400).json({ message: 'No user is logged in' });

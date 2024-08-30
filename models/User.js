@@ -12,7 +12,7 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: function() {
       return !this.googleId;
-    }
+    },
   },
   email: { type: String, required: true, unique: true },
   role: { type: String, enum: ['admin', 'seller', 'customer', 'driver', 'rider'], default: 'customer' },
@@ -25,8 +25,12 @@ const UserSchema = new mongoose.Schema({
   },
   availability: { type: Boolean, default: true },
   currentLocation: {
-    type: { type: String, enum: ['Point'] },
-    coordinates: { type: [Number] }
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+    },
+    coordinates: { type: [Number], default: [0, 0] }
   },
   status: { type: String, enum: ['online', 'offline'], default: 'offline' },
   paymentMethods: [

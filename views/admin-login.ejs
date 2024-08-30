@@ -111,12 +111,12 @@
   <form id="loginForm" action="/admin/admin-login" method="post">
     <h1>Admin Login</h1>
     <label for="username">Username:</label>
-    <input type="text" id="username" name="username" required>
+    <input type="text" id="username" name="username" required aria-label="Username">
     <label for="password">Password:</label>
-    <input type="password" id="password" name="password" required>
+    <input type="password" id="password" name="password" required aria-label="Password">
     <div class="btn-container">
-      <button type="submit" class="btn">Login</button>
-      <a href="/auth/google" class="btn google-btn"><i class="fab fa-google"></i>Login with Google</a>
+      <button type="submit" class="btn" aria-label="Login Button">Login</button>
+      <a href="/auth/google" class="btn google-btn" aria-label="Login with Google"><i class="fab fa-google"></i>Login with Google</a>
     </div>
     <p><a href="/request-reset">Forgot Password?</a></p>
     <p><a href="/register">Don't have an account? Register here</a></p>

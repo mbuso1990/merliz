@@ -1,4 +1,4 @@
-const Pusher = require('pusher');  // Correct import statement
+const Pusher = require('pusher');  // Ensure Pusher is correctly required
 
 const pusherInstance = new Pusher({
   appId: process.env.PUSHER_APP_ID,
@@ -13,25 +13,35 @@ module.exports = function(io) {
     console.log('A user connected');
 
     socket.on('joinRoom', ({ userId, tripId }) => {
-      socket.join(tripId);
-      console.log(`User ${userId} joined room ${tripId}`);
+      if (tripId) {
+        socket.join(tripId);
+        console.log(`User ${userId} joined room ${tripId}`);
+      } else {
+        console.log('No tripId provided to join room');
+      }
     });
 
     socket.on('chatMessage', (message) => {
-      console.log(`Message to ${message.tripId}: ${message.message}`);
+      if (message.tripId) {
+        io.to(message.tripId).emit('chatMessage', message);
 
-      io.to(message.tripId).emit('chatMessage', message);
-
-      pusherInstance.trigger('my-channel', 'my-event', {
-        message: message.message,
-        tripId: message.tripId,
-        userId: message.userId,
-      });
+        pusherInstance.trigger('my-channel', 'my-event', {
+          message: message.message,
+          tripId: message.tripId,
+          userId: message.userId,
+        });
+      } else {
+        console.error('No tripId provided for chatMessage');
+      }
     });
 
     socket.on('driverLocationUpdate', ({ tripId, location }) => {
-      console.log(`Driver for trip ${tripId} is at location:`, location);
-      io.to(tripId).emit('driverLocationUpdate', { tripId, location });
+      if (tripId) {
+        console.log(`Driver for trip ${tripId} is at location:`, location);
+        io.to(tripId).emit('driverLocationUpdate', { tripId, location });
+      } else {
+        console.error('No tripId provided for driverLocationUpdate');
+      }
     });
 
     socket.on('disconnect', () => console.log('User disconnected'));

@@ -1,63 +1,94 @@
+
+require('dotenv').config(); // Load environment variables if not already done
+
 const express = require('express');
-const axios = require('axios');
+const mongoose = require('mongoose');
 const Trip = require('../models/Trip');
+const Driver = require('../models/Driver');
+const Pusher = require('pusher');
+
 const User = require('../models/User');
 const { ensureAuthenticated, ensureRole } = require('../middleware/auth');
 const router = express.Router();
-
-const GOOGLE_MAPS_API_KEY = 'AIzaSyAG8YFYpxHJSBvM7bnoWl2tNxDF05Usfow';
-
-
-// Get all trips
-router.get('/', async (req, res) => {
-  try {
-    const trips = await Trip.find().populate('rider driver');
-    res.status(200).json(trips);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+// Pusher configuration
+// Configure Pusher
+// Pusher configuration
+const pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER,
+  useTLS: true,
 });
 
-// Create a Trip (Book a ride)
-router.post('/book', async (req, res) => {
-  console.log('Received trip booking request:', req.body);
-  
+async function notifyDriverAndWait(driver, trip, timeout, req, notifiedDrivers) {
+  const io = req.app.get('socketio');
+  const tripId = trip._id.toString();
+  const driverRoom = driver._id.toString();
+
+  // Check if the driver has already been notified for this trip
+  if (notifiedDrivers.has(driver._id.toString())) {
+    console.log(`Driver ${driver._id} has already been notified for trip ${tripId}. Skipping...`);
+    return Promise.resolve(false); // Skip this driver
+  }
+
+  return new Promise((resolve) => {
+    let isHandled = false; // Flag to prevent race conditions
+    notifiedDrivers.add(driver._id.toString()); // Mark this driver as notified
+
+    console.log(`Emitting 'newTrip' event to driver ${driver._id} for trip ${tripId}`);
+    io.to(driverRoom).emit('newTrip', trip);
+
+    // Listener for driver response
+    const responseListener = (response) => {
+      console.log(`Received driver response for trip ${tripId} from driver ${response.driverId}`);
+
+      if (!isHandled && response.tripId === tripId && response.driverId === driver._id.toString()) {
+        console.log(`Driver ${driver._id} approved trip ${tripId}. Cleaning up...`);
+        isHandled = true; // Set flag to prevent further handling
+        io.off('driverResponse', responseListener); // Clean up the listener
+        clearTimeout(timeoutId); // Clear the timeout
+        resolve(response.accepted); // Resolve with the driver's response
+      }
+    };
+
+    io.on('driverResponse', responseListener);
+
+    // Fallback after the timeout
+    const timeoutId = setTimeout(async () => {
+      if (!isHandled) {
+        console.log(`Timeout for driver ${driver._id} for trip ${tripId}`);
+        isHandled = true; // Set flag to prevent further handling
+        io.off('driverResponse', responseListener); // Clean up the listener on timeout
+        
+        // Check if the trip has already been accepted
+        const latestTrip = await Trip.findById(tripId);
+        if (latestTrip && latestTrip.status === 'accepted') {
+          console.log(`Trip ${tripId} already accepted by another driver. No further action needed.`);
+          resolve(false);
+        } else {
+          resolve(false); // Resolve with false as the driver did not respond in time
+        }
+      }
+    }, timeout);
+  });
+}
+
+
+
+router.post('/book-trip', ensureAuthenticated, ensureRole('rider'), async (req, res) => {
   try {
-    const { rider, driver, origin, destination, fare } = req.body;
+    const { rider, origin, destination, distance, fare, duration } = req.body;
 
-    // Find driver and rider in the database
-    const foundDriver = await User.findById(driver);
-    const foundRider = await User.findById(rider);
-
-    // Log the driver and rider details
-    console.log('Found Driver:', foundDriver);
-    console.log('Found Rider:', foundRider);
-
-    if (!foundDriver || !foundRider) {
-      console.error('Driver or Rider not found:', { driver, rider });
-      return res.status(404).json({ message: 'Driver or Rider not found' });
+    // Validation to ensure all required fields are present
+    if (!rider || !origin || !destination || !distance || !fare || !duration) {
+      console.log('Validation error: Missing fields in request body:', req.body);
+      return res.status(400).json({ message: 'All fields are required: rider, origin, destination, distance, fare, and duration.' });
     }
 
-    // Calculate distance and duration using Google Maps Distance Matrix API
-    const distanceMatrixUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&key=${GOOGLE_MAPS_API_KEY}`;
-    const distanceMatrixResponse = await axios.get(distanceMatrixUrl);
-
-    // Log the response from the Distance Matrix API
-    console.log('Distance Matrix Response:', distanceMatrixResponse.data);
-
-    if (distanceMatrixResponse.data.status !== 'OK') {
-      console.error('Failed to calculate distance and duration:', distanceMatrixResponse.data);
-      return res.status(500).json({ error: 'Failed to calculate distance and duration' });
-    }
-
-    const element = distanceMatrixResponse.data.rows[0].elements[0];
-    const distance = element.distance.value; // in meters
-    const duration = element.duration.value; // in seconds
-
-    // Create and save the new trip
-    const newTrip = new Trip({
+    // Create a new trip without coordinates
+    const trip = new Trip({
       rider,
-      driver,
       origin,
       destination,
       fare,
@@ -66,58 +97,125 @@ router.post('/book', async (req, res) => {
       status: 'requested'
     });
 
-    await newTrip.save();
-    console.log('New trip saved successfully:', newTrip);
+    try {
+      console.log('Saving trip data:', trip);
+      await trip.save();
+      console.log('Trip saved successfully');
+    } catch (saveError) {
+      console.error('Error saving trip:', saveError.message);
+      return res.status(500).json({ error: 'Failed to save trip data' });
+    }
 
-    // Update the ride history for both the driver and the rider
-    await User.findByIdAndUpdate(driver, { $push: { rideHistory: newTrip._id } });
-    await User.findByIdAndUpdate(rider, { $push: { rideHistory: newTrip._id } });
-    console.log('Ride history updated for driver and rider');
+    console.log('Searching for available drivers...');
+    let maxAttempts = 3;
+    const notifiedDrivers = new Set(); // Keep track of notified drivers
 
-    // Populate the trip details with rider and driver information
-    const populatedTrip = await Trip.findById(newTrip._id).populate('rider', 'username').populate('driver', 'username');
-    console.log('Populated trip details:', populatedTrip);
+    while (maxAttempts > 0) {
+      const drivers = await Driver.find({
+        status: 'online',
+        availability: true
+      });
 
-    // Emit the new trip event to the client via socket.io
-    const io = req.app.get('socketio');
-    io.emit('newTrip', populatedTrip);
+      if (drivers.length === 0) {
+        console.log('No drivers found nearby');
+        break; // Exit loop if no drivers are available
+      }
 
-    // Send the trip details back to the client
-    res.status(201).json(populatedTrip);
+      console.log('Drivers found:', drivers.length);
+
+      for (const driver of drivers) {
+        console.log(`Sending trip request to driver ${driver._id}...`);
+
+        // Check if the trip is already accepted by another driver
+        const latestTrip = await Trip.findById(trip._id);
+        if (latestTrip.status === 'accepted') {
+          console.log(`Trip ${trip._id} already accepted. Stopping further requests.`);
+          return res.status(200).json({ message: 'Trip already accepted by another driver.', trip: latestTrip });
+        }
+
+        const driverAccepted = await notifyDriverAndWait(driver, trip, 6000, req, notifiedDrivers);
+
+        if (driverAccepted) {
+          trip.driver = driver._id;
+          trip.status = 'accepted';
+          await trip.save();
+
+          driver.status = 'on_trip';
+          driver.availability = false;
+          await driver.save();
+
+          const io = req.app.get('socketio');
+          io.to(driver._id.toString()).emit('tripConfirmed', trip);
+          io.to(rider.toString()).emit('tripConfirmed', trip);
+
+          console.log('Trip confirmed and driver assigned:', driver._id);
+          return res.status(200).json({ message: 'Trip confirmed', trip });
+        }
+      }
+
+      maxAttempts -= 1;
+    }
+
+    console.log('No drivers accepted the trip after multiple attempts');
+    return res.status(404).json({ message: 'No drivers accepted the trip after multiple attempts.' });
   } catch (error) {
-    console.error('Error during trip booking:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('Error booking trip:', error.message); // Log the exact error message
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 
 
-// Approve a Trip
-// routes/trip.js
+
+
+
+
+
+
+
 
 router.post('/approve/:tripId', ensureAuthenticated, ensureRole(['driver', 'admin']), async (req, res) => {
   try {
+    const { driverId, profilePicture, plateNumber } = req.body;
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      console.log('Driver not found');
+      return res.status(404).json({ message: 'Driver not found' });
+    }
+
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
+      console.log('Trip not found');
       return res.status(404).json({ message: 'Trip not found' });
     }
 
+    trip.driver = driver._id;
     trip.status = 'accepted';
     trip.approved = true;
     await trip.save();
 
-    const io = req.app.get('socketio');
-    io.to(trip.rider._id.toString()).emit('tripApproved', trip);
+    console.log(`Trip approved by driver ${driver.name} (ID: ${driverId}) for trip ID: ${trip._id}`);
 
     res.status(200).json({ message: 'Trip approved', trip });
   } catch (error) {
+    console.error('Error approving trip:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 
+
+// Reject a Trip
 router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['driver', 'admin']), async (req, res) => {
   try {
+    const { driverId, profilePicture, plateNumber } = req.body;
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      return res.status(404).json({ message: 'Driver not found' });
+    }
+
     const trip = await Trip.findById(req.params.tripId).populate('rider');
     if (!trip) {
       return res.status(404).json({ message: 'Trip not found' });
@@ -127,19 +225,47 @@ router.post('/reject/:tripId', ensureAuthenticated, ensureRole(['driver', 'admin
     trip.approved = false;
     await trip.save();
 
+    // Log the driver's details
+    console.log('Driver Username:', driver.name);
+    console.log('Driver Number Plate:', plateNumber);
+    console.log('Driver Profile Picture:', profilePicture);
+
     const io = req.app.get('socketio');
     io.to(trip.rider._id.toString()).emit('tripRejected', {
       trip,
-      message: 'Please try again, drivers are not available at the moment.'
+      message: 'Please try again, drivers are not available at the moment.',
+      driverUsername: driver.name,  // Include driver's username
     });
 
     res.status(200).json({ message: 'Trip rejected', trip });
   } catch (error) {
+    console.error('Error rejecting trip:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 
+// Get Available Trips for Drivers
+router.get('/available-trips', ensureAuthenticated, ensureRole('driver'), async (req, res) => {
+  try {
+    console.log('Fetching available trips for driver:', req.user);
+
+    const availableTrips = await Trip.find({ status: 'requested' })
+      .populate('rider', 'username email')
+      .sort({ createdAt: -1 });
+
+    console.log('Trips found:', availableTrips);
+
+    if (!availableTrips || availableTrips.length === 0) {
+      return res.status(404).json({ message: 'No available trips found' });
+    }
+
+    res.status(200).json(availableTrips);
+  } catch (error) {
+    console.error('Error fetching available trips:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Get Trip Status by ID
 router.get('/status/:tripId', ensureAuthenticated, async (req, res) => {
@@ -175,7 +301,6 @@ router.post('/cancel/:tripId', ensureAuthenticated, ensureRole(['rider', 'driver
   }
 });
 
-
 // Get trip history for a user
 router.get('/history/:userId', ensureAuthenticated, async (req, res) => {
   try {
@@ -195,5 +320,48 @@ router.get('/history/:userId', ensureAuthenticated, async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Get all bookings for a specific rider
+router.get('/requests', ensureAuthenticated, ensureRole('rider'), async (req, res) => {
+  try {
+    const trips = await Trip.find({ rider: req.user.id })
+      .populate('driver', 'name email phone vehicle')
+      .populate('rider', 'username email phone')
+      .sort({ createdAt: -1 }); // Sort by most recent first
+
+    if (!trips || trips.length === 0) {
+      return res.status(404).json({ message: 'No trip requests found' });
+    }
+
+    res.status(200).json(trips);
+  } catch (error) {
+    console.error('Error fetching trip requests:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/fetch-trip/:tripId', ensureAuthenticated, ensureRole('rider'), async (req, res) => {
+  try {
+    const tripId = req.params.tripId;
+    console.log('Trip ID:', tripId);
+    console.log('Rider ID from JWT:', req.user._id);
+
+    const trip = await Trip.findOne({ _id: tripId, rider: req.user._id })
+      .populate('driver', 'profilePicture licensePlate');
+
+    console.log('Trip found:', trip);
+
+    if (!trip) {
+      return res.status(404).json({ message: 'Trip not found' });
+    }
+
+    res.json(trip);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 module.exports = router;

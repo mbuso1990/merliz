@@ -3,7 +3,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const Rider = require('../models/Rider');
 const User = require('../models/User');
-const { ensureAuthenticated } = require('../middleware/auth');
+const Trip = require('../models/Trip');
+// const { ensureAuthenticated } = require('../middleware/auth');
+const { ensureAuthenticated, ensureRole } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -18,49 +20,52 @@ const generateToken = (user) => {
   );
 };
 
-// Login route using username
 router.post('/login', async (req, res) => {
-  try {
-    const { username, password } = req.body;
+  console.log('Request body:', req.body);  // Log the incoming request body
 
-    const user = await User.findOne({ username, role: 'rider' });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+  const { username, password } = req.body;
+  console.log('Login attempt:', { username, password });
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-
-    const token = generateToken(user);
-
-    // Fetch the Rider details to include in the response
-    const rider = await Rider.findOne({ userId: user._id });
-
-    res.status(200).json({
-      user: {
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        phone: user.phone,
-        profilePicture: user.profilePicture,
-        availability: user.availability,
-        status: user.status,
-        rideHistory: user.rideHistory,
-        _id: user._id,
-        paymentMethods: user.paymentMethods,
-        createdAt: user.createdAt,
-        riderId: rider ? rider._id : null, // Include Rider ID if available
-        riderProfilePicture: rider ? rider.profilePicture : null, // Include Rider's profile picture if available
-      },
-      token,
-    });
-  } catch (error) {
-    console.error('Error during login:', error);
-    res.status(500).json({ error: 'Server error' });
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username and password are required' });
   }
+
+  const user = await User.findOne({ username, role: 'rider' });
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) {
+    return res.status(400).json({ message: 'Invalid credentials' });
+  }
+
+  const token = generateToken(user);
+
+  // Fetch the Rider details to include in the response
+  const rider = await Rider.findOne({ userId: user._id });
+
+  res.status(200).json({
+    user: {
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      phone: user.phone,
+      profilePicture: user.profilePicture,
+      availability: user.availability,
+      status: user.status,
+      rideHistory: user.rideHistory,
+      _id: user._id,
+      paymentMethods: user.paymentMethods,
+      createdAt: user.createdAt,
+      riderId: rider ? rider._id : null,
+      riderProfilePicture: rider ? rider.profilePicture : null,
+    },
+    token,
+  });
 });
+
+
 
 // Register rider
 router.post('/register', async (req, res) => {
@@ -133,20 +138,16 @@ router.get('/:id', ensureAuthenticated, async (req, res) => {
       return res.status(404).json({ message: 'Rider not found' });
     }
 
-    console.log('Rider ID:', rider._id); // Logging the Rider's ID to the console
-
     res.status(200).json(rider);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-
+// Update rider profile
 router.put('/:id', ensureAuthenticated, async (req, res) => {
   try {
     const { username, email, phone, profilePicture } = req.body;
-
-    console.log('Updating user with ID:', req.params.id);
 
     // Update User document
     const updatedUser = await User.findByIdAndUpdate(
@@ -156,11 +157,8 @@ router.put('/:id', ensureAuthenticated, async (req, res) => {
     );
 
     if (!updatedUser) {
-      console.log('User not found');
       return res.status(404).json({ message: 'User not found' });
     }
-
-    console.log('Updated User:', updatedUser);
 
     // Update Rider document
     const updatedRider = await Rider.findOneAndUpdate(
@@ -170,11 +168,8 @@ router.put('/:id', ensureAuthenticated, async (req, res) => {
     );
 
     if (!updatedRider) {
-      console.log('Rider not found');
       return res.status(404).json({ message: 'Rider not found' });
     }
-
-    console.log('Updated Rider:', updatedRider);
 
     res.status(200).json({ 
       message: 'Profile updated successfully', 
@@ -184,16 +179,87 @@ router.put('/:id', ensureAuthenticated, async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Failed to update profile:', error);
     res.status(500).json({ error: 'Failed to update profile' });
   }
 });
-
 
 // Logout route for rider
 router.post('/logout', ensureAuthenticated, (req, res) => {
   req.user = null; // Invalidate the user session (JWT token)
   res.status(200).json({ message: 'Logged out successfully' });
 });
+
+// Get all bookings by a rider
+router.get('/:riderId/bookings', ensureAuthenticated, async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    const bookings = await Trip.find({ rider: riderId })
+      .populate('driver', 'name email phone vehicle')
+      .populate('rider', 'username email phone')
+      .sort({ createdAt: -1 }); // Sort by most recent first
+
+    res.status(200).json(bookings);
+  } catch (error) {
+    console.error('Error fetching rider bookings:', error.message);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+// Get all bookings (for admin or reporting)
+router.get('/bookings', ensureAuthenticated, ensureRole(['admin']), async (req, res) => {
+  try {
+    const bookings = await Trip.find()
+      .populate('driver', 'name email phone vehicle')
+      .populate('rider', 'username email phone')
+      .sort({ createdAt: -1 }); // Sort by most recent first
+
+    res.status(200).json(bookings);
+  } catch (error) {
+    console.error('Error fetching all bookings:', error.message);
+    res.status(500).json({ error: 'Failed to fetch bookings' });
+  }
+});
+
+// Get all trip requests for a specific rider
+router.get('/requests/:riderId', ensureAuthenticated, ensureRole(['rider', 'admin']), async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    const trips = await Trip.find({ rider: riderId })
+      .populate('driver', 'name email phone vehicle')
+      .populate('rider', 'username email phone')
+      .sort({ createdAt: -1 }); // Sort by most recent first
+
+    if (!trips.length) {
+      return res.status(404).json({ message: 'No trip requests found for this rider' });
+    }
+
+    res.status(200).json(trips);
+  } catch (error) {
+    console.error('Error fetching trip requests:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all requests made by a rider
+router.get('/requests', ensureAuthenticated, ensureRole('rider'), async (req, res) => {
+  try {
+    // Assuming that `req.user.id` is the authenticated rider's ID
+    const trips = await Trip.find({ rider: req.user.id })
+      .populate('driver', 'name email phone vehicle')
+      .populate('rider', 'username email phone')
+      .sort({ createdAt: -1 }); // Sort by most recent first
+
+    if (!trips || trips.length === 0) {
+      return res.status(404).json({ message: 'No trip requests found for this rider' });
+    }
+
+    res.status(200).json(trips);
+  } catch (error) {
+    console.error('Error fetching trip requests:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 
 module.exports = router;

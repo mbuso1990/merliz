@@ -9,6 +9,7 @@ const Driver = require('../models/Driver');
 const User = require('../models/User');
 const Trip = require('../models/Trip');
 const { ensureAuthenticated, ensureRole } = require('../middleware/auth');
+
 const router = express.Router();
 
 // Cloudinary configuration
@@ -46,8 +47,7 @@ const calculateDistance = (coord1, coord2) => {
   return d; // Distance in km
 };
 
-// Routes for Driver
-// Register Driver
+// Driver Registration
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password, phone, vehicle } = req.body;
@@ -81,15 +81,13 @@ router.post('/register', async (req, res) => {
       status: 'offline',
       currentLocation: {
         type: 'Point',
-        coordinates: [0, 0]
+        coordinates: [0, 0] // Initial default coordinates
       }
     });
     await newDriver.save();
 
     const token = generateToken(newUser);
-    const trips = await Trip.find({ driver: newDriver._id });
-
-    res.status(201).json({ message: 'Driver registered successfully', token, driver: newDriver, trips });
+    res.status(201).json({ message: 'Driver registered successfully', token, driver: newDriver });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -111,60 +109,44 @@ router.post('/login', (req, res, next) => {
         }
 
         const token = generateToken(user);
-        console.log('Generated token for driver:', token); // Log the token to the console
-        const trips = await Trip.find({ driver: driver._id }).populate('rider');
+        console.log('Generated token for driver:', token);
 
-        res.status(200).json({ token, driver, trips });
-      });
-    } else if (user.role === 'admin') {
-      req.login(user, async (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-
-        const token = generateToken(user);
-        console.log('Generated token for admin:', token); // Log the token to the console
-
-        res.status(200).json({ token, user });  // Admin has no driver-specific info
+        res.status(200).json({ token, driver });
       });
     } else {
       return res.status(403).json({ message: 'Unauthorized' });
     }
   })(req, res, next);
 });
+
+// Fetch Driver Data
 router.get('/me', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
   try {
-    console.log('Fetching driver data for userId:', req.user.id);
     const driver = await Driver.findOne({ userId: req.user.id }).populate('userId', 'username email');
     if (!driver) {
-      console.error('Driver not found for userId:', req.user.id);
       return res.status(404).json({ message: 'Driver not found' });
     }
-    console.log('Driver data:', driver);
     res.status(200).json(driver);
   } catch (error) {
-    console.error('Error fetching driver data:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // Update Driver Profile
 router.put('/me', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
   try {
     const { name, email, phone, vehicle, profilePicture } = req.body;
 
-    // Find the user by ID stored in the JWT
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Find the driver associated with the user
     const driver = await Driver.findOne({ userId: req.user.id });
     if (!driver) {
       return res.status(404).json({ message: 'Driver not found' });
     }
 
-    // Update the user and driver information
     user.username = name || user.username;
     user.email = email || user.email;
     driver.name = name || driver.name;
@@ -175,40 +157,45 @@ router.put('/me', ensureAuthenticated, ensureRole(['driver']), async (req, res) 
       driver.profilePicture = profilePicture;
     }
 
-    // Save the updates
     await user.save();
     await driver.save();
 
-    // Generate a new token with updated information
     const token = generateToken(user);
 
-    // Respond with updated driver data and new token
     res.status(200).json({ message: 'Profile updated successfully', token, driver });
   } catch (error) {
-    console.error('Error updating profile:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 
 // Update Driver Location
-router.put('/location/:id', async (req, res) => {
+// Update Driver Location
+router.put('/location/:id', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
   try {
     const { coordinates } = req.body;
+    if (!coordinates || coordinates.length !== 2 || coordinates.includes(null)) {
+      return res.status(400).json({ error: 'Invalid coordinates provided' });
+    }
+
     const driver = await Driver.findByIdAndUpdate(req.params.id, {
       currentLocation: { type: 'Point', coordinates }
     }, { new: true });
+
+    if (!driver) {
+      return res.status(404).json({ message: 'Driver not found' });
+    }
+
     res.status(200).json(driver);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Driver Profile Picture Upload
-router.post('/upload-profile-picture', ensureAuthenticated, ensureRole('driver'), upload.single('profilePicture'), async (req, res) => {
-  try {
-    console.log('Received file:', req.file);
 
+// Driver Profile Picture Upload
+router.post('/upload-profile-picture', ensureAuthenticated, ensureRole(['driver']), upload.single('profilePicture'), async (req, res) => {
+  try {
     const file = req.file;
     if (!file) {
       return res.status(400).json({ message: 'No file uploaded' });
@@ -218,27 +205,20 @@ router.post('/upload-profile-picture', ensureAuthenticated, ensureRole('driver')
       { resource_type: 'image' },
       async (error, result) => {
         if (error) {
-          console.error('Error uploading to Cloudinary:', error);
           return res.status(500).json({ error: 'Failed to upload image' });
         }
 
         const imageUrl = result.secure_url;
-        console.log('Image uploaded to Cloudinary:', imageUrl);
+        const driver = await Driver.findOne({ userId: req.user._id });
 
-        try {
-          const driver = await Driver.findOne({ userId: req.user._id });
-          if (!driver) {
-            return res.status(404).json({ message: 'Driver not found' });
-          }
-
-          driver.profilePicture = imageUrl;
-          await driver.save();
-
-          res.status(200).json({ profilePicture: imageUrl });
-        } catch (err) {
-          console.error('Error saving profile picture:', err);
-          res.status(500).json({ error: 'Failed to save profile picture' });
+        if (!driver) {
+          return res.status(404).json({ message: 'Driver not found' });
         }
+
+        driver.profilePicture = imageUrl;
+        await driver.save();
+
+        res.status(200).json({ profilePicture: imageUrl });
       }
     );
 
@@ -268,6 +248,24 @@ router.get('/available', async (req, res) => {
   }
 });
 
+// Fetch Online Drivers
+router.get('/online-drivers', async (req, res) => {
+  try {
+    const onlineDrivers = await Driver.find({ status: 'online', availability: true })
+      .populate('userId', 'username email');
+
+    if (!onlineDrivers || onlineDrivers.length === 0) {
+      return res.status(404).json({ message: 'No online drivers found' });
+    }
+
+    res.status(200).json(onlineDrivers);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch online drivers' });
+  }
+});
+
+
+
 // Fetch Driver Status
 router.get('/status/:driverId', async (req, res) => {
   try {
@@ -282,18 +280,26 @@ router.get('/status/:driverId', async (req, res) => {
   }
 });
 
-// Update Driver Status
+// Update Driver Status and Location
 router.put('/status/:driverId', async (req, res) => {
   try {
     const driverId = req.params.driverId;
-    const { status } = req.body;
+    const { status, coordinates } = req.body; // Expect coordinates in the body
 
-    const driver = await Driver.findByIdAndUpdate(driverId, { status }, { new: true });
+    const updateData = { status };
+    if (coordinates && coordinates.length === 2) {
+      updateData.currentLocation = {
+        type: 'Point',
+        coordinates,
+      };
+    }
+
+    const driver = await Driver.findByIdAndUpdate(driverId, updateData, { new: true });
     if (!driver) {
       return res.status(404).json({ message: 'Driver not found' });
     }
 
-    res.status(200).json({ message: 'Driver status updated', status: driver.status });
+    res.status(200).json({ message: 'Driver status and location updated', status: driver.status, currentLocation: driver.currentLocation });
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -301,7 +307,7 @@ router.put('/status/:driverId', async (req, res) => {
 
 
 // Delete All Drivers (Admin only)
-router.delete('/drivers', ensureAuthenticated, ensureRole('admin'), async (req, res) => {
+router.delete('/drivers', ensureAuthenticated, ensureRole(['admin']), async (req, res) => {
   try {
     await Driver.deleteMany({});
     res.status(200).json({ message: 'All drivers deleted successfully' });
@@ -311,7 +317,7 @@ router.delete('/drivers', ensureAuthenticated, ensureRole('admin'), async (req, 
 });
 
 // Driver Dashboard (for rendering in a view)
-router.get('/dashboard', ensureAuthenticated, ensureRole('driver'), async (req, res) => {
+router.get('/dashboard', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
   try {
     const driver = await Driver.findOne({ userId: req.user._id }).populate('userId', 'username');
     const trips = await Trip.find({ driver: req.user._id }).populate('rider');
@@ -322,7 +328,7 @@ router.get('/dashboard', ensureAuthenticated, ensureRole('driver'), async (req, 
 });
 
 // Start a Trip
-router.post('/start/:tripId', ensureAuthenticated, ensureRole('driver'), async (req, res) => {
+router.post('/start/:tripId', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
   try {
     const trip = await Trip.findById(req.params.tripId);
     if (!trip) {
@@ -351,11 +357,35 @@ router.get('/distance/:driverId/:tripId', async (req, res) => {
       return res.status(404).json({ message: 'Driver or Trip not found' });
     }
 
-    const distance = calculateDistance(driver.currentLocation.coordinates, [trip.destination.latitude, trip.destination.longitude]);
+    const distance = calculateDistance(driver.currentLocation.coordinates, [trip.origin.latitude, trip.origin.longitude]);
     res.status(200).json({ distance });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Start a Trip
+router.post('/start/:tripId', ensureAuthenticated, ensureRole(['driver']), async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.tripId);
+    if (!trip) {
+      return res.status(404).json({ message: 'Trip not found' });
+    }
+    trip.status = 'in_progress';
+    await trip.save();
+
+    const io = req.app.get('socketio');
+    if (!io) {
+      return res.status(500).json({ error: "Socket.IO instance not found" });
+    }
+
+    io.to(trip._id.toString()).emit('tripStarted', trip);
+
+    res.status(200).json({ message: 'Trip started', trip });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 
 module.exports = router;
